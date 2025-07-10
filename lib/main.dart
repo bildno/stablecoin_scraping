@@ -1,9 +1,32 @@
+import 'dart:convert';
+import 'dart:math';
+
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'dart:io' show Platform;
+import 'package:http/http.dart' as http;
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'news_model.dart';
 import 'news_service.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp();
+
+  if (Platform.isAndroid || Platform.isIOS) {
+    FirebaseMessaging messaging = FirebaseMessaging.instance;
+
+    // Android 13 이상: 알림 권한 요청
+    await messaging.requestPermission(
+      alert: true,
+      badge: true,
+      sound: true,
+    );
+  }
+
   runApp(const MyApp());
 }
 
@@ -31,15 +54,85 @@ class MyHomePage extends StatefulWidget {
   State<MyHomePage> createState() => _MyHomePageState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
+class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   final TextEditingController _searchController = TextEditingController();
   List<News> newsList = [];
   bool isLoading = false;
+  bool _fcmReady = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadNews('');
+    _setupFCM().then((_) {
+      setState(() => _fcmReady = true);
+    });
+  }
+
+  final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
+      FlutterLocalNotificationsPlugin();
+  Future<void> _setupFCM() async {
+    const AndroidNotificationChannel channel = AndroidNotificationChannel(
+      'push_channel_id', // ID used in show()
+      'Push Channel',
+      importance: Importance.max,
+    );
+
+
+    FirebaseMessaging messaging = FirebaseMessaging.instance;
+
+    NotificationSettings settings = await messaging.requestPermission();
+    print('알림 권한 상태 : ${settings.authorizationStatus}');
+
+    // Initialize flutterLocalNotificationsPlugin
+    const AndroidInitializationSettings androidInitSettings =
+        AndroidInitializationSettings('@mipmap/ic_launcher');
+
+    const DarwinInitializationSettings iosInitSettings = DarwinInitializationSettings();
+
+    const InitializationSettings initSettings = InitializationSettings(
+      android: androidInitSettings,
+      iOS: iosInitSettings,
+    );
+
+    await flutterLocalNotificationsPlugin.initialize(initSettings);
+
+    String? token = await messaging.getToken();
+    if (token != null) {
+      print('토큰 있따 : $token');
+    } else {
+      print('토큰 업따');
+    }
+
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) async {
+      print('📥 포그라운드 메시지 수신!');
+      if (message.notification != null) {
+        print('알림 제목: ${message.notification!.title}');
+        print('알림 내용: ${message.notification!.body}');
+        // Create Android notification channel before showing notification
+
+
+        await flutterLocalNotificationsPlugin
+            .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+            ?.createNotificationChannel(channel);
+
+        // Show local notification when app is in foreground
+        flutterLocalNotificationsPlugin.show(
+          0,
+          message.notification!.title,
+          message.notification!.body,
+          const NotificationDetails(
+            android: AndroidNotificationDetails(
+              'push_channel_id',
+              'Push Channel',
+              importance: Importance.max,
+              priority: Priority.high,
+            ),
+          ),
+        );
+      }
+    });
   }
 
   Future<void> _loadNews(String keyword) async {
@@ -61,6 +154,62 @@ class _MyHomePageState extends State<MyHomePage> {
       throw 'Could not launch $url';
     }
   }
+
+  Future<void> sendPushToServer(String token) async {
+    final String baseUrl;
+
+    if (kIsWeb) {
+      baseUrl = 'http://localhost:8080'; // 웹 실행 시
+    } else if (Platform.isAndroid) {
+      baseUrl = 'http://10.0.2.2:8080'; // Android 에뮬레이터
+    } else {
+      baseUrl = 'http://127.0.0.1:8080'; // iOS, macOS, 기타
+    }
+
+    final response = await http.post(
+      Uri.parse('$baseUrl/api/news/send-push'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'token': token,
+        'title': 'ZDNet 알림',
+        'body': '3초 뒤 푸쉬!!',
+      }),
+    );
+
+    if (response.statusCode == 200) {
+      print('✅ 서버 푸시 요청 성공');
+    } else {
+      print('❌ 서버 푸시 요청 실패: ${response.body}');
+    }
+
+  }
+
+  Future<void> sendPushDelayedToServer(String token) async {
+    final String baseUrl = kIsWeb
+        ? 'http://localhost:8080'
+        : Platform.isAndroid
+          ? 'http://10.0.2.2:8080'
+          : 'http://127.0.0.1:8080';
+
+
+    final response = await http.post(
+      Uri.parse('$baseUrl/api/news/send-push-delayed'),
+      headers: {'Content-Type' : 'application/json'},
+      body : jsonEncode({
+        'token' : token,
+        'title' : '돌아오세여',
+        'body' : '돌아와주세여',
+      }),
+    );
+
+    if(response.statusCode == 200){
+      print('돌아와 푸시 예약');
+    }else{
+      print('돌아와 푸시 예약 실패');
+    }
+  }
+
+
 
   @override
   Widget build(BuildContext context) {
@@ -167,6 +316,58 @@ class _MyHomePageState extends State<MyHomePage> {
                 ),
               ],
             ),
+      floatingActionButton: (_fcmReady &&
+          FirebaseMessaging.instance.getToken() != null)
+          ? FloatingActionButton(
+              onPressed: () async {
+                String? token = await FirebaseMessaging.instance.getToken();
+                if (token != null && token.isNotEmpty) {
+                  print('📤 서버에 푸시 요청 중...');
+                  await sendPushToServer(token);
+                } else {
+                  print('❌ 토큰 준비 안 됨');
+                  if (context.mounted) {
+                    showDialog(
+                      context: context,
+                      builder: (_) => AlertDialog(
+                        title: const Text('토큰 없음'),
+                        content: const Text('FCM 초기화 중입니다. 잠시 후 다시 시도해주세요.'),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(context),
+                            child: const Text('확인'),
+                          ),
+                        ],
+                      ),
+                    );
+                  }
+                }
+              },
+              child: const Icon(Icons.notifications),
+            )
+          : null,
     );
   }
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) async {
+    if (state == AppLifecycleState.paused) {
+      // 앱이 백그라운드로 전환될 때 푸시 예약 요청
+      String? token = await FirebaseMessaging.instance.getToken();
+      if (token != null && token.isNotEmpty) {
+        print('📤 앱 백그라운드 전환됨 - 푸시 예약 요청');
+        await sendPushDelayedToServer(token);
+      } else {
+        print('❌ 토큰이 없어 푸시 예약 요청 불가');
+      }
+    }
+  }
+
 }
+
+
