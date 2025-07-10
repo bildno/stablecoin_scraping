@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:android_intent_plus/android_intent.dart';
 import 'news_model.dart';
 import 'news_service.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -147,11 +148,41 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   }
 
   void _launchURL(String url) async {
-    final uri = Uri.parse(url);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri);
+    final cleanUrl = url.startsWith('http') ? url : 'https://$url';
+
+    if (Platform.isAndroid) {
+      final intent = AndroidIntent(
+        action: 'action_view',
+        data: cleanUrl,
+        package: 'com.android.chrome',
+      );
+      try {
+        await intent.launch();
+      } catch (e) {
+        print('크롬 실행 실패: $e');
+      }
     } else {
-      throw 'Could not launch $url';
+      final uri = Uri.parse(cleanUrl);
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } else {
+        print('링크 열기 실패 (iOS): $uri');
+        if (context.mounted) {
+          showDialog(
+            context: context,
+            builder: (_) => AlertDialog(
+              title: const Text('링크 열기 실패'),
+              content: Text('해당 링크를 열 수 없습니다:\n$uri'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('확인'),
+                ),
+              ],
+            ),
+          );
+        }
+      }
     }
   }
 
@@ -177,9 +208,9 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     );
 
     if (response.statusCode == 200) {
-      print('✅ 서버 푸시 요청 성공');
+      print(' 서버 푸시 요청 성공');
     } else {
-      print('❌ 서버 푸시 요청 실패: ${response.body}');
+      print(' 서버 푸시 요청 실패: ${response.body}');
     }
 
   }
@@ -322,10 +353,10 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
               onPressed: () async {
                 String? token = await FirebaseMessaging.instance.getToken();
                 if (token != null && token.isNotEmpty) {
-                  print('📤 서버에 푸시 요청 중...');
+                  print('서버에 푸시 요청 중...');
                   await sendPushToServer(token);
                 } else {
-                  print('❌ 토큰 준비 안 됨');
+                  print('토큰 준비 안 됨');
                   if (context.mounted) {
                     showDialog(
                       context: context,
@@ -360,14 +391,12 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
       // 앱이 백그라운드로 전환될 때 푸시 예약 요청
       String? token = await FirebaseMessaging.instance.getToken();
       if (token != null && token.isNotEmpty) {
-        print('📤 앱 백그라운드 전환됨 - 푸시 예약 요청');
+        print(' 앱 백그라운드 전환됨 - 푸시 예약 요청');
         await sendPushDelayedToServer(token);
       } else {
-        print('❌ 토큰이 없어 푸시 예약 요청 불가');
+        print(' 토큰이 없어 푸시 예약 요청 불가');
       }
     }
   }
 
 }
-
-
