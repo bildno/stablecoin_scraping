@@ -21,11 +21,7 @@ void main() async {
     FirebaseMessaging messaging = FirebaseMessaging.instance;
 
     // Android 13 이상: 알림 권한 요청
-    await messaging.requestPermission(
-      alert: true,
-      badge: true,
-      sound: true,
-    );
+    await messaging.requestPermission(alert: true, badge: true, sound: true);
   }
 
   runApp(const MyApp());
@@ -60,14 +56,19 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   List<News> newsList = [];
   bool isLoading = false;
   bool _fcmReady = false;
+  String? _fcmToken;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _loadNews('');
-    _setupFCM().then((_) {
-      setState(() => _fcmReady = true);
+    _setupFCM().then((_) async {
+      final token = await FirebaseMessaging.instance.getToken();
+      setState(() {
+        _fcmReady = true;
+        _fcmToken = token;
+      });
     });
   }
 
@@ -80,7 +81,6 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
       importance: Importance.max,
     );
 
-
     FirebaseMessaging messaging = FirebaseMessaging.instance;
 
     NotificationSettings settings = await messaging.requestPermission();
@@ -90,7 +90,8 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     const AndroidInitializationSettings androidInitSettings =
         AndroidInitializationSettings('@mipmap/ic_launcher');
 
-    const DarwinInitializationSettings iosInitSettings = DarwinInitializationSettings();
+    const DarwinInitializationSettings iosInitSettings =
+        DarwinInitializationSettings();
 
     const InitializationSettings initSettings = InitializationSettings(
       android: androidInitSettings,
@@ -107,15 +108,16 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     }
 
     FirebaseMessaging.onMessage.listen((RemoteMessage message) async {
-      print('📥 포그라운드 메시지 수신!');
+      print('포그라운드 메시지 수신!');
       if (message.notification != null) {
         print('알림 제목: ${message.notification!.title}');
         print('알림 내용: ${message.notification!.body}');
         // Create Android notification channel before showing notification
 
-
         await flutterLocalNotificationsPlugin
-            .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+            .resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin
+            >()
             ?.createNotificationChannel(channel);
 
         // Show local notification when app is in foreground
@@ -212,35 +214,27 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     } else {
       print(' 서버 푸시 요청 실패: ${response.body}');
     }
-
   }
 
   Future<void> sendPushDelayedToServer(String token) async {
     final String baseUrl = kIsWeb
         ? 'http://localhost:8080'
         : Platform.isAndroid
-          ? 'http://10.0.2.2:8080'
-          : 'http://127.0.0.1:8080';
-
+        ? 'http://10.0.2.2:8080'
+        : 'http://127.0.0.1:8080';
 
     final response = await http.post(
       Uri.parse('$baseUrl/api/news/send-push-delayed'),
-      headers: {'Content-Type' : 'application/json'},
-      body : jsonEncode({
-        'token' : token,
-        'title' : '돌아오세여',
-        'body' : '돌아와주세여',
-      }),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'token': token, 'title': '돌아오세요', 'body': '다시 접속해주세요'}),
     );
 
-    if(response.statusCode == 200){
+    if (response.statusCode == 200) {
       print('돌아와 푸시 예약');
-    }else{
+    } else {
       print('돌아와 푸시 예약 실패');
     }
   }
-
-
 
   @override
   Widget build(BuildContext context) {
@@ -347,14 +341,12 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                 ),
               ],
             ),
-      floatingActionButton: (_fcmReady &&
-          FirebaseMessaging.instance.getToken() != null)
+      floatingActionButton: (_fcmReady && _fcmToken != null)
           ? FloatingActionButton(
               onPressed: () async {
-                String? token = await FirebaseMessaging.instance.getToken();
-                if (token != null && token.isNotEmpty) {
+                if (_fcmToken != null && _fcmToken!.isNotEmpty) {
                   print('서버에 푸시 요청 중...');
-                  await sendPushToServer(token);
+                  await sendPushToServer(_fcmToken!);
                 } else {
                   print('토큰 준비 안 됨');
                   if (context.mounted) {
@@ -379,6 +371,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
           : null,
     );
   }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
@@ -398,5 +391,4 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
       }
     }
   }
-
 }
