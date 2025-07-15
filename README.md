@@ -4,18 +4,38 @@
 ## 시스템 흐름도
 
 사용자 (Flutter 앱)
-       ↓ HTTP 요청
+
+
+↓ HTTP 요청
+
+
 Spring Boot 서버 (/api/news/{keyword})
-       ↓
+
+
+↓
+
 Jsoup으로 뉴스 스크래핑
 
-
+----
 사용자 (Flutter 앱)
-       ↓ HTTP 요청
+
+
+ ↓ HTTP 요청
+
+       
 Spring Boot 서버 (/api/news/send-push, /api/news/send-push-delayed)
-	   ↓
+
+
+ ↓
+
+    
  Firebase Admin SDK로 FCM 전송
-       ↓
+
+ 
+ ↓
+
+
+       
 사용자 디바이스로 푸시 알림 도착 
 
 -----
